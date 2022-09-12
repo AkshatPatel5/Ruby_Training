@@ -1,77 +1,167 @@
 # frozen_string_literal: true
-
+ 
+class Classifier
+  FOODS = ['chocolate'].freeze
+  MEDICINES = ['pills'].freeze
+ 
+  def is_tax_exempt?(product_title)
+    @product_title = product_title
+ 
+    is_food? || is_medicine? || is_book?
+  end
+ 
+  def is_food?
+    FOODS.any? { |food| @product_title.include?(food) }
+  end
+ 
+  def is_medicine?
+    MEDICINES.any? { |medicine| @product_title.include?(medicine) }
+  end
+ 
+  def is_book?
+    @product_title.include?('book')
+  end
+end
+ 
+class Order
+  attr_reader :qtd, :title, :unit_price, :tax, :price_with_tax, :is_imported, :tax_exempt
+ 
+  def transform(plain_order:, classifier:, taxcalculator:)
+    @plain_order = plain_order
+    @classifier = classifier
+    @taxcalculator = taxcalculator
+ 
+    serialize
+    classify
+    taxify
+    self
+  end
+ 
+  def price_with_tax
+    (price + tax).round(2)
+  end
+ 
+  def price
+    @qtd * @unit_price
+  end
+ 
+  private
+ 
+  def serialize
+    string_qtd, rest = @plain_order.split(' ', 2)
+    @qtd = string_qtd.to_i
+    @title, string_price = rest.split(' at ', 2)
+    @unit_price = string_price.to_f
+    @is_imported = @title.include?('imported')
+  end
+ 
+  def classify
+    @tax_exempt = @classifier.is_tax_exempt?(@title)
+  end
+ 
+  def taxify
+    @tax = @taxcalculator.calculate(price, @is_imported, @tax_exempt)
+  end
+end
+ 
+class Orders
+  attr_reader :list
+ 
+  def initialize
+    @list = []
+  end
+ 
+  def <<(product)
+    @list << product
+  end
+ 
+  def total_price_with_taxes
+    @list.map(&:price_with_tax).inject(0, &:+)
+  end
+ 
+  def total_taxes
+    (@list.map(&:tax).inject(0, &:+) * 20).round / 20.0
+  end
+end
+ 
+class Recipt
+  def print(orders)
+    @orders = orders
+ 
+    print_orders_list
+    print_sales_tax
+    print_total_price
+  end
+ 
+  private
+ 
+  def print_orders_list
+    order_list = @orders.list.map do |order|
+      "#{order.qtd} #{order.title}: #{order.price_with_tax}"
+    end
+ 
+    puts(order_list)
+  end
+ 
+  def print_sales_tax
+    puts("Sales Taxes: #{@orders.total_taxes}")
+  end
+ 
+  def print_total_price
+    puts("Total: #{@orders.total_price_with_taxes}")
+  end
+end
+ 
+class TaxCalculator
+  BASIC_SALES_TAX_PERCENT = 10
+  IMPORTED_TAX_PERCENT = 5
+ 
+  def calculate(price, is_imported, tax_exempt)
+    @price = price
+    @is_imported = is_imported
+    @tax_exempt = tax_exempt
+ 
+    simple_tax + import_tax
+  end
+ 
+  private
+ 
+  def simple_tax
+    @tax_exempt ? 0 : percent(@price, BASIC_SALES_TAX_PERCENT)
+  end
+ 
+  def import_tax
+    @is_imported ? percent(@price, IMPORTED_TAX_PERCENT) : 0
+  end
+ 
+  def percent(value, percentage)
+    (value * percentage / 5).round / 20.0
+  end
+end
+ 
 class SalesOperation
-  def initialize(item_details)
-    @name = item_details[:product_name]
-    @type = item_details[:product_type] # 1=imported, 2=basic, 3=both
-    @cost_price = item_details[:cost_price].to_f
-    @quantity = item_details[:quantity].to_i
-    @tax = 0
+  def initialize
+    @classifier = Classifier.new
+    @orders = Orders.new
+    @recipt = Recipt.new
+    @taxcalculator = TaxCalculator.new
   end
-
-  def generate_tax
-    @tax = ((@cost_price * 5) / 5).round / 20.0 if @type == '1'
-    @tax = ((@cost_price * 10) / 5).round / 20.0 if @type == '2'
-    @tax = ((@cost_price * 15) / 5).round / 20.0 if @type == '3'
-    @tax
-  end
-
-  def generate_recipt
-    selling_price = @quantity * (@cost_price + @tax).round(2)
-    puts "#{@quantity} #{@name} :#{selling_price}"
-    selling_price
+ 
+  def run
+    items = []
+    puts "Please enter product details, Enter 0 after completion"
+    loop do
+      i = gets.chomp
+      break if i == '0'
+     
+      items.push(i)
+    end
+    items.each do |item|
+      order = Order.new.transform(plain_order: item, classifier: @classifier, taxcalculator: @taxcalculator)
+      @orders << order
+    end
+ 
+    @recipt.print(@orders)
   end
 end
-products = []
-food = []
-medical_products = []
-food.push('chocolate bar', 'chocolate', 'imported box of chocolate', 'box of imported chocolate')
-medical_products.push('packet of headache pills')
-total = 0.0
-sales_tax = 0.0
-
-loop do
-  puts 'Please enter your product name'
-  product_name = gets.chomp
-
-  puts "Please enter your product type\nEnter 1 for imported and 0 for non-imported"
-  product_type = gets.chomp
-  while product_type != '1' && product_type != '0'
-    puts 'Please enter valid number for product type'
-    product_type = gets.chomp
-  end
-
-  puts 'Please enter your product price'
-  cost_price = gets.chomp
-  while cost_price.to_f <= 0
-    puts "Price can't be 0 or negative or alphabetical value"
-    cost_price = gets.chomp.to_i
-  end
-
-  puts 'Please enter your quantity'
-  quantity = gets.chomp
-  while quantity.to_i <= 0
-    puts "Quantity can't be 0 or negative or alphabetical value"
-    quantity = gets.chomp.to_i
-  end
-
-  product = { product_name: product_name, product_type: product_type, cost_price: cost_price, quantity: quantity }
-  products.push(product)
-
-  puts 'Please enter 1 to add product or 0 to print recipt'
-  break if gets.chomp == '0'
-end
-
-products.each do |i|
-  if food.include?(i[:product_name]) || medical_products.include?(i[:product_name]) || i[:product_name] == 'book'
-  elsif i[:product_type] == '1'
-    i[:product_type] = '3'
-  else
-    i[:product_type] = '2'
-  end
-  item = SalesOperation.new(i)
-  sales_tax += item.generate_tax
-  total += item.generate_recipt
-end
-
-puts "Sales Taxes: #{sales_tax}\nTotal: #{total}"
+SalesOperation.new.run
